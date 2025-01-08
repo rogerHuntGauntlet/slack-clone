@@ -53,7 +53,7 @@ const Message: FC<MessageProps> = ({ message, currentUser, onReply }) => {
     return <Download size={24} />;
   }
 
-  const renderAttachment = (attachment: MessageProps['message']['file_attachments'][0]) => {
+  const renderAttachment = (attachment: NonNullable<typeof message.file_attachments>[number]) => {
     const fileExtension = attachment.file_name.split('.').pop()?.toLowerCase();
     const isImage = ['jpg', 'jpeg', 'png', 'gif'].includes(fileExtension || '');
 
@@ -84,67 +84,107 @@ const Message: FC<MessageProps> = ({ message, currentUser, onReply }) => {
   return (
     <div
       id={`message-${message.id}`}
-      className="mb-4"
+      className="group relative mb-3 hover:z-10 transition-all duration-200"
     >
-      <div className={`p-3 rounded-lg shadow-md ${
-        isCurrentUserMessage ? 'bg-blue-500 bg-opacity-50 ml-auto' : 'bg-pink-500 bg-opacity-50'
-      } backdrop-blur-md max-w-3/4 break-words`}>
-        <div className="flex items-center mb-2">
+      <div className={`
+        flex items-start gap-3 px-4 py-2.5 rounded-lg
+        ${isCurrentUserMessage 
+          ? 'bg-gradient-to-r from-blue-500/20 via-blue-600/15 to-blue-500/10' 
+          : 'bg-gradient-to-r from-purple-500/20 via-purple-600/15 to-purple-500/10'
+        } 
+        backdrop-blur-sm hover:backdrop-blur-md
+        transition-all duration-300
+        hover:shadow-lg hover:shadow-black/5
+        hover:translate-x-0.5
+      `}>
+        <div className="relative flex-shrink-0">
           <img
             src={message.user?.avatar_url || '/placeholder.svg?height=40&width=40'}
             alt="User Avatar"
-            className="w-10 h-10 rounded-full mr-2 object-cover"
+            className="w-10 h-10 rounded-full object-cover ring-2 ring-white/10 
+                       transition-transform duration-300 group-hover:scale-105"
           />
-          <div>
-            <p className="font-semibold text-white">{message.user?.username || (isCurrentUserMessage ? 'You' : 'User')}</p>
-            <p className="text-xs text-gray-200">{new Date(message.created_at).toLocaleString()}</p>
-          </div>
         </div>
-        <div 
-          className="mb-2 text-white" 
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(message.content) }} 
-        />
-        {message.file_attachments && message.file_attachments.map((attachment, index) => (
-          <div key={index} className="mb-2">
-            {renderAttachment(attachment)}
+
+        <div className="flex-grow min-w-0 space-y-2">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-white/90">
+                {message.user?.username || (isCurrentUserMessage ? 'You' : 'User')}
+              </span>
+              <span className="text-[11px] text-white/50">
+                {new Date(message.created_at).toLocaleString([], { 
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit', 
+                  minute: '2-digit'
+                })}
+              </span>
+            </div>
           </div>
-        ))}
-        <div className="flex items-center space-x-2 mt-2">
-          <EmojiReactions
-            messageId={message.id}
-            currentUserId={currentUser.id}
-            initialReactions={message.reactions || {}}
+
+          <div className="text-white/90 text-sm break-words leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(message.content) }} 
           />
-          <button
-            className="text-white hover:text-blue-300 transition-colors duration-200 flex items-center"
-            onClick={() => setShowReplies(!showReplies)}
-          >
-            <MessageSquare size={16} className="mr-1" />
-            {showReplies ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            {message.replies && message.replies.length > 0 && ` (${message.replies.length})`}
-          </button>
+          
+          {message.file_attachments?.map((attachment, index) => (
+            <div key={index} className="inline-block hover:scale-[1.02] transition-transform duration-200">
+              {renderAttachment(attachment)}
+            </div>
+          ))}
+
+          <div className="flex items-center gap-2 mt-1.5 ml-auto">
+            <EmojiReactions
+              messageId={message.id}
+              currentUserId={currentUser.id}
+              initialReactions={message.reactions || {}}
+            />
+            
+            <button
+              onClick={() => setShowReplies(!showReplies)}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-full
+                         bg-white/5 hover:bg-white/10 
+                         transition-all duration-200
+                         text-white/70 hover:text-white/90"
+            >
+              <MessageSquare size={13} />
+              {message.replies && message.replies.length > 0 && (
+                <span className="text-xs font-medium">{message.replies.length}</span>
+              )}
+            </button>
+          </div>
         </div>
       </div>
+
       {showReplies && (
-        <div className="mt-2 ml-8">
-          {message.replies && Array.isArray(message.replies) && message.replies.map((reply) => (
+        <div className="mt-2 mr-4 ml-auto space-y-2 animate-slideDown max-w-[75%]">
+          {message.replies?.map((reply) => (
             <ReplyComponent key={reply.id} reply={reply} currentUser={currentUser} />
           ))}
-          <div className="mt-2 flex items-center">
+          
+          <div className="flex items-center gap-2 mt-3 group/reply">
             <input
               type="text"
               value={replyContent}
               onChange={(e) => setReplyContent(e.target.value)}
-              placeholder="Type your reply..."
-              className="flex-grow p-2 rounded-l-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Reply to thread..."
+              className="flex-grow px-4 py-2 text-sm bg-white/5 rounded-full
+                         border border-white/10 
+                         focus:border-white/20 focus:bg-white/10
+                         focus:outline-none focus:ring-1 focus:ring-white/20
+                         placeholder:text-gray-400
+                         transition-all duration-200"
             />
             <button
               onClick={handleReply}
-              className="p-2 bg-transparent text-white hover:text-blue-500 disabled:text-gray-400
-                         rounded-r-md border border-l-0 border-gray-300
-                         transition-all duration-200 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95"
+              disabled={!replyContent.trim()}
+              className="p-2 rounded-full
+                         bg-blue-500/80 hover:bg-blue-500
+                         disabled:opacity-50 disabled:hover:bg-blue-500/80
+                         transition-all duration-200
+                         transform hover:scale-105 active:scale-95"
             >
-              <Reply size={20} />
+              <Reply size={16} className="text-white" />
             </button>
           </div>
         </div>

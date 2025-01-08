@@ -1,5 +1,12 @@
 import { createClient } from '@supabase/supabase-js'
 
+export interface FileAttachment {
+  id: string;          // Unique identifier for the file
+  file_name: string;   // Name of the file
+  file_type: string;   // MIME type of the file
+  file_url: string;    // URL to access the file
+}
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rlaxacnkrfohotpyvnam.supabase.co"
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsYXhhY25rcmZvaG90cHl2bmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzYxOTk3NjcsImV4cCI6MjA1MTc3NTc2N30.djQ3ExBd5Y2wb2sUOZCs5g72U2EgdYte7NqFiLesE9Y"
 
@@ -109,137 +116,128 @@ export async function getChannels(workspaceId: string) {
   return data
 }
 
-export async function getMessages(channelId: string) {
-  const { data: messages, error: messagesError } = await supabase
+export const getMessages = async (channelId: string) => {
+  // First, get all top-level messages (messages that are not replies)
+  const { data: messages, error } = await supabase
     .from('messages')
     .select(`
-      id,
-      content,
-      created_at,
-      user_id,
-      file_url,
-      users:users!messages_user_id_fkey(id, username, avatar_url),
-      message_reactions(id, reaction, user_id)
+      *,
+      user:users!messages_user_id_fkey(id, username, avatar_url),
+      replies:messages(
+        *,
+        user:users!messages_user_id_fkey(id, username, avatar_url)
+      )
     `)
     .eq('channel', channelId)
-    .is('is_direct_message', false)
+    .is('parent_id', null) // Only get messages that are not replies
     .order('created_at', { ascending: true })
 
-  if (messagesError) {
-    console.error('Error fetching messages:', messagesError)
-    return []
-  }
-
-  const messagesWithReplies = await Promise.all(messages.map(async (message: any) => {
-    const { data: replies, error: repliesError } = await supabase
-      .from('messages')
-      .select(`
-        id,
-        content,
-        created_at,
-        user_id,
-        users:users!messages_user_id_fkey(id, username, avatar_url)
-      `)
-      .eq('parent_id', message.id)
-      .order('created_at', { ascending: true })
-
-    if (repliesError) {
-      console.error('Error fetching replies:', repliesError)
-      return {
-        ...message,
-        user: message.users,
-        reactions: message.message_reactions.reduce((acc: any, reaction: any) => {
-          if (!acc[reaction.reaction]) {
-            acc[reaction.reaction] = []
-          }
-          acc[reaction.reaction].push(reaction.user_id)
-          return acc
-        }, {}),
-        replies: []
-      }
-    }
-
-    return {
-      ...message,
-      user: message.users,
-      reactions: message.message_reactions.reduce((acc: any, reaction: any) => {
-        if (!acc[reaction.reaction]) {
-          acc[reaction.reaction] = []
-        }
-        acc[reaction.reaction].push(reaction.user_id)
-        return acc
-      }, {}),
-      replies: replies.map((reply: any) => ({
-        ...reply,
-        user: reply.users
-      }))
-    }
-  }))
-
-  return messagesWithReplies
-}
-
-export async function sendMessage(channelId: string, userId: string, content: string, fileUrl: string | null = null) {
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      channel: channelId,
-      user_id: userId,
-      content,
-      is_direct_message: false,
-      file_url: fileUrl
-    })
-    .select(`
-      id,
-      content,
-      created_at,
-      user_id,
-      file_url,
-      users:users!messages_user_id_fkey(id, username, avatar_url),
-      message_reactions(id, reaction, user_id)
-    `)
-    .single()
-
   if (error) {
-    console.error('Error sending message:', error)
+    console.error('Error fetching messages:', error)
     throw error
   }
 
-  return {
-    ...data,
-    user: data.users,
-    reactions: {},
-    file_url: data.file_url
-  }
+  return messages || []
 }
 
-export async function sendReply(channelId: string, userId: string, parentId: string, content: string) {
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      channel: channelId,
-      user_id: userId,
-      parent_id: parentId,
-      content,
-    })
-    .select(`
-      id,
-      content,
-      created_at,
-      user_id,
-      parent_id,
-      users:users!messages_user_id_fkey(id, username, avatar_url)
-    `)
-    .single()
+export const sendReply = async (
+  channelId: string,
+  userId: string,
+  parentId: string,
+  content: string
+) => {
+  try {
+    // First get the user data
+    const { data: userData } = await supabase
+      .from('users')
+      .select('id, username, email, avatar_url')
+      .eq('id', userId)
+      .single()
 
-  if (error) {
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        channel: channelId,
+        user_id: userId,
+        content,
+        parent_id: parentId
+      })
+      .select(`
+        *,
+        user:users!messages_user_id_fkey(
+          id,
+          username,
+          avatar_url,
+          email
+        )
+      `)
+      .single()
+
+    if (error) throw error
+
+    // Return with guaranteed user data
+    return {
+      ...data,
+      user: data.user || userData || {
+        id: userId,
+        username: 'Unknown User',
+        avatar_url: null
+      }
+    }
+  } catch (error) {
     console.error('Error sending reply:', error)
     throw error
   }
+}
 
-  return {
-    ...data,
-    user: data.users,
+export const sendMessage = async (
+  channelId: string,
+  userId: string,
+  content: string,
+  attachments: FileAttachment[]
+) => {
+  try {
+    // First get the user data
+    const { data: userData } = await supabase
+      .from('users')
+      .select('id, username, email, avatar_url')
+      .eq('id', userId)
+      .single()
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        channel: channelId,
+        user_id: userId,
+        content: content,
+        has_attachment: attachments.length > 0,
+        file_attachments: attachments
+      })
+      .select(`
+        *,
+        user:users!messages_user_id_fkey(
+          id,
+          username,
+          avatar_url,
+          email
+        )
+      `)
+      .single()
+
+    if (error) throw error
+
+    // Return with guaranteed user data
+    return {
+      ...data,
+      user: data.user || userData || {
+        id: userId,
+        username: 'Unknown User',
+        avatar_url: null
+      }
+    }
+  } catch (error) {
+    console.error('Error sending message:', error)
+    throw error
   }
 }
 

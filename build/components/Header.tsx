@@ -1,5 +1,5 @@
 import { FC, useState } from "react";
-import { Moon, Sun, User, PlusCircle, LogOut } from 'lucide-react';
+import { Moon, Sun, User, Undo, LogOut } from 'lucide-react';
 import Link from 'next/link';
 
 interface HeaderProps {
@@ -47,18 +47,16 @@ const Header: FC<HeaderProps> = ({
 
       {/* Header Content */}
       <div className="bg-gray-900/80 backdrop-blur-xl shadow-2xl">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
+        <div className="px-2 py-4">
+          <div className="flex items-center gap-3">
             {/* AI Assistant Button */}
-            <div className="relative">
-              <Link href="/ai-chat" className="relative z-10 flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 shadow-lg hover:shadow-xl hover:scale-110 transition-transform">
-                <img
-                  src="https://media.tenor.com/NeaT_0PBOzQAAAAM/robot-reaction-eww.gif"
-                  alt="AI Assistant"
-                  className="w-8 h-8 rounded-full"
-                />
-              </Link>
-            </div>
+            <Link href="/ai-chat" className="relative z-10 flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 shadow-lg hover:shadow-xl hover:scale-110 transition-transform">
+              <img
+                src="https://media.tenor.com/NeaT_0PBOzQAAAAM/robot-reaction-eww.gif"
+                alt="AI Assistant"
+                className="w-8 h-8 rounded-full"
+              />
+            </Link>
 
             {/* Logo */}
             <div className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
@@ -69,8 +67,8 @@ const Header: FC<HeaderProps> = ({
             <div className="flex items-center gap-3">
               <NavButton
                 onClick={onReturnToWorkspaceSelection}
-                icon={<PlusCircle className="w-5 h-5" />}
-                label="New"
+                icon={<Undo className="w-5 h-5" />}
+                label="Workspaces"
                 hoverColor="blue-400"
                 title="Return to Workspace Selection"
               />
@@ -82,12 +80,7 @@ const Header: FC<HeaderProps> = ({
                 hoverColor="pink-400"
               />
 
-              <NavButton
-                onClick={toggleDarkMode}
-                icon={isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                label={isDarkMode ? "Light" : "Dark"}
-                hoverColor="yellow-400"
-              />
+              
 
               <NavButton
                 onClick={onLogout}

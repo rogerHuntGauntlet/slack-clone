@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getWorkspaces, createWorkspace, joinWorkspace, getUserByEmail, createUserProfile, getChannels, getUserCount, testSupabaseConnection } from '../../lib/supabase'
+import { getWorkspaces, createWorkspace, joinWorkspace, getUserByEmail, createUserProfile, getChannels, supabase, getUserCount, testSupabaseConnection } from '../../lib/supabase'
 import Sidebar from '../../components/Sidebar'
 import ChatArea from '../../components/ChatArea'
 import Header from '../../components/Header'
@@ -11,14 +11,33 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import CollapsibleDMList from '../../components/CollapsibleDMList'
 import DirectMessageArea from '../../components/DirectMessageArea'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { Suspense } from 'react'
+
+interface Workspace {
+  id: string;
+  name: string;
+  role: string;
+  isFavorite: boolean;
+}
+
+// Add new interfaces for typing status
+interface TypingStatus {
+  userId: string;
+  channelId: string;
+  isTyping: boolean;
+}
+
+interface UserStatus {
+  id: string;
+  online: boolean;
+  last_seen: string;
+}
 
 export default function Platform() {
   const [user, setUser] = useState<{ id: string; email: string; username?: string } | null>(null)
   const [activeWorkspace, setActiveWorkspace] = useState('')
   const [activeChannel, setActiveChannel] = useState('')
   const [activeDM, setActiveDM] = useState<string | null>(null)
-  const [workspaces, setWorkspaces] = useState<{ id: string; name: string; role: string }[]>([])
+  const [workspaces, setWorkspaces] = useState<{ id: string; name: string; role: string; isFavorite: boolean }[]>([])
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -29,10 +48,13 @@ export default function Platform() {
   const [userWorkspaceIds, setUserWorkspaceIds] = useState<string[]>([])
   const [userCount, setUserCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState('') // Added state variable
   const MAX_USERS = 40
   const router = useRouter()
   const searchParams = useSearchParams()
+  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [typingUsers, setTypingUsers] = useState<TypingStatus[]>([])
+  const [onlineUsers, setOnlineUsers] = useState<UserStatus[]>([])
 
   const supabase = createClientComponentClient()
 
@@ -47,13 +69,15 @@ export default function Platform() {
             email: session.user.email || '',
             username: session.user.user_metadata.username
           })
-          const userData = await getUserByEmail(session.user.email)
-          if (userData) {
-            setUser(userData)
-            await fetchUserData(userData.id, userData.email)
-          } else {
-            throw new Error('User data not found')
-          }
+          console.log("session: ", session)
+          const userData = await getUserByEmail(session.user.email || '')
+            if (userData) {
+              setUser(userData)
+              await fetchUserData(userData.id, userData.email)
+            } else {
+              throw new Error('User data not found')
+            }
+       
         } else {
           const storedEmail = sessionStorage.getItem('userEmail')
           if (storedEmail) {
@@ -84,6 +108,7 @@ export default function Platform() {
         getWorkspaces(userId),
         getUserByEmail(email)
       ])
+
       if (userProfile) {
         setUser(prevUser => ({
           ...prevUser,
@@ -91,11 +116,23 @@ export default function Platform() {
         }))
       }
 
-      setWorkspaces(userWorkspaces)
-      setUserWorkspaceIds(userWorkspaces.map(workspace => workspace.id))
+      const updatedWorkspaces = userWorkspaces.map(workspace => ({
+        id: workspace.id,
+        name: workspace.name,
+        role: workspace.role,
+        isFavorite: false,
+      }))
+
+      setWorkspaces(updatedWorkspaces)
+      setUserWorkspaceIds(updatedWorkspaces.map(workspace => workspace.id))
       
-      if (userWorkspaces.length > 0) {
-        setShowWorkspaceSelection(true)
+      if (updatedWorkspaces.length > 0) {
+       // setActiveWorkspace(userWorkspaces[0].id)
+       // const channels = await getChannels(userWorkspaces[0].id)
+       // if (channels.length > 0) {
+       //   setActiveChannel(channels[0].id)
+       // }
+       setShowWorkspaceSelection(true)
       } else {
         setShowWorkspaceSelection(true)
       }
@@ -107,6 +144,12 @@ export default function Platform() {
 
   useEffect(() => {
     document.documentElement.classList.add('dark')
+    const workspaceId = searchParams.get('workspaceId')
+    if (workspaceId) {
+      fetchWorkspaceName(workspaceId).then(name => {
+        if (name) setJoiningWorkspaceName(name)
+      })
+    }
     testSupabaseConnection().then(isConnected => {
       if (isConnected) {
         fetchUserCount()
@@ -127,8 +170,12 @@ export default function Platform() {
   const fetchWorkspaces = async (userId: string) => {
     try {
       const userWorkspaces = await getWorkspaces(userId)
-      setWorkspaces(userWorkspaces)
-      return userWorkspaces
+      const updatedWorkspaces = userWorkspaces.map(workspace => ({
+        ...workspace,
+        isFavorite: false,
+      }))
+      setWorkspaces(updatedWorkspaces)
+      return updatedWorkspaces
     } catch (error) {
       console.error('Error fetching workspaces:', error)
       setError('Failed to fetch workspaces. Please try again.')
@@ -189,6 +236,7 @@ export default function Platform() {
         } else if (userWorkspaces.length > 0) {
           setShowWorkspaceSelection(true)
         } else {
+          // No workspaces, show create workspace form
           setShowWorkspaceSelection(true)
         }
       } else {
@@ -226,7 +274,10 @@ export default function Platform() {
     try {
       await joinWorkspace(workspaceId, userId)
       const updatedWorkspaces = await fetchWorkspaces(userId)
-      setWorkspaces(updatedWorkspaces)
+      setWorkspaces(updatedWorkspaces.map(workspace => ({
+        ...workspace,
+        isFavorite: false
+      })))
       setUserWorkspaceIds(updatedWorkspaces.map(workspace => workspace.id))
       setActiveWorkspace(workspaceId)
       await fetchChannels(workspaceId)
@@ -238,10 +289,31 @@ export default function Platform() {
     }
   }
 
-  const handleWorkspaceSelect = (workspaceId: string) => {
-    setActiveWorkspace(workspaceId)
-    fetchChannels(workspaceId)
-    setShowWorkspaceSelection(false)
+  const handleWorkspaceSelect = async (workspaceId: string) => {
+    try {
+      console.log("handleWorkspaceSelect: ", workspaceId)
+      // Set the active workspace
+      setActiveWorkspace(workspaceId);
+      
+      // Fetch channels for the new workspace
+      const channels = await getChannels(workspaceId);
+      console.log("channels: ", channels);
+      
+      // Set the first channel as active (usually 'general')
+      if (channels && channels.length > 0) {
+        setActiveChannel(channels[0].id); // Set the first channel as active
+      } else {
+        setActiveChannel(''); // Clear active channel if none exist
+      }
+      
+      // Clear any active DM when switching workspaces
+      setActiveDM(null);
+      
+      // Close the workspace selection view
+      setShowWorkspaceSelection(false);
+    } catch (error) {
+      console.error('Error switching workspace:', error);
+    }
   }
 
   const toggleDarkMode = () => {
@@ -303,6 +375,75 @@ export default function Platform() {
     setShowWorkspaceSelection(true)
   }
 
+  const onToggleFavorite = (workspaceId: string) => {
+    setWorkspaces(prevWorkspaces => 
+      prevWorkspaces.map(workspace => 
+        workspace.id === workspaceId 
+          ? { ...workspace, isFavorite: !workspace.isFavorite } 
+          : workspace
+      )
+    );
+  };
+
+  // Add real-time subscriptions after user authentication
+  useEffect(() => {
+    if (!user?.id) return
+
+    // Subscribe to user presence changes
+    const presenceSubscription = supabase
+      .channel('online-users')
+      .on('presence', { event: 'sync' }, () => {
+        const presentUsers = Object.values(presenceSubscription.presenceState()) as unknown as UserStatus[];
+        setOnlineUsers(presentUsers);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await presenceSubscription.track({
+            id: user.id,
+            online: true,
+            last_seen: new Date().toISOString(),
+          })
+        }
+      })
+
+    // Subscribe to typing indicators
+    const typingSubscription = supabase
+      .channel('typing-indicators')
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        setTypingUsers(current => {
+          const filtered = current.filter(t => t.userId !== payload.userId)
+          if (payload.isTyping) {
+            return [...filtered, payload]
+          }
+          return filtered
+        })
+      })
+      .subscribe()
+
+    // Cleanup subscriptions
+    return () => {
+      presenceSubscription.unsubscribe()
+      typingSubscription.unsubscribe()
+    }
+  }, [user?.id])
+
+  // Add function to broadcast typing status
+  const updateTypingStatus = async (isTyping: boolean) => {
+    if (!user?.id || !activeChannel) return
+
+    await supabase
+      .channel('typing-indicators')
+      .send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+          userId: user.id,
+          channelId: activeChannel,
+          isTyping,
+        },
+      })
+  }
+
   if (loading) {
     return <div className="flex items-center justify-center h-screen">Loading...</div>
   }
@@ -310,7 +451,7 @@ export default function Platform() {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-r from-pink-300 to-blue-300 dark:from-pink-900 dark:to-blue-900">
-        <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md w-96">
+        <div className="bg-gray-800 dark:bg-gray-800 p-8 rounded-lg shadow-md w-96">
           <h1 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Welcome to ChatGenius</h1>
           <p className="text-center text-gray-600 dark:text-gray-400 mb-4">
             Current users: {userCount} / {MAX_USERS}
@@ -363,6 +504,7 @@ export default function Platform() {
         onCreateWorkspace={handleCreateWorkspace}
         newWorkspaceName={newWorkspaceName}
         setNewWorkspaceName={setNewWorkspaceName}
+        onToggleFavorite={onToggleFavorite}
       />
     )
   }
@@ -379,43 +521,50 @@ export default function Platform() {
         onReturnToWorkspaceSelection={handleReturnToWorkspaceSelection}
       />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          activeWorkspace={activeWorkspace}
-          setActiveWorkspace={setActiveWorkspace}
-          activeChannel={activeChannel}
-          setActiveChannel={setActiveChannel}
-          currentUser={user}
-          workspaces={workspaces}
-        />
-        <div className="flex-1 flex">
-          {activeChannel && (
+        {!isCollapsed && (
+          <>
+            <CollapsibleDMList
+              workspaceId={activeWorkspace}
+              onSelectDM={handleSelectDM}
+              activeUserId={activeDM}
+              className="w-64"
+            />
+            <Sidebar
+              activeWorkspace={activeWorkspace}
+              setActiveWorkspace={setActiveWorkspace}
+              activeChannel={activeChannel}
+              setActiveChannel={(channel) => {
+                setActiveChannel(channel)
+                setActiveDM(null)
+              }}
+              currentUser={user}
+              workspaces={workspaces}
+            />
+          </>
+        )}
+        <div className="flex-1 flex flex-col overflow-hidden bg-gray-800 border-2 border-white">
+          {activeWorkspace && activeChannel && user && !activeDM && (
             <ChatArea
               activeWorkspace={activeWorkspace}
               activeChannel={activeChannel}
               currentUser={user}
               onSwitchChannel={handleSwitchChannel}
               userWorkspaces={userWorkspaceIds}
+              isCollapsed={isCollapsed}
+              onToggleCollapse={() => setIsCollapsed(!isCollapsed)}
+              typingUsers={typingUsers}
+              onlineUsers={onlineUsers}
+              updateTypingStatus={updateTypingStatus}
             />
           )}
-          {activeDM && (
+          {activeWorkspace && activeDM && user && (
             <DirectMessageArea
               currentUser={user}
-              otherUserId={activeDM}
-            />
-          )}I understand. I'll continue the text stream from the cut-off point, maintaining coherence and consistency with the previous content. Here's the continuation:
-
-user}
               otherUserId={activeDM}
             />
           )}
         </div>
       </div>
-      <Suspense fallback={<div>Loading...</div>}>
-        <WorkspaceJoiner
-          setJoiningWorkspaceName={setJoiningWorkspaceName}
-          fetchWorkspaceName={fetchWorkspaceName}
-        />
-      </Suspense>
       {showProfileModal && (
         <ProfileModal
           currentUser={user}
@@ -424,20 +573,5 @@ user}
       )}
     </div>
   )
-}
-
-function WorkspaceJoiner({ setJoiningWorkspaceName, fetchWorkspaceName }) {
-  const searchParams = useSearchParams()
-  const workspaceId = searchParams.get('workspaceId')
-
-  useEffect(() => {
-    if (workspaceId) {
-      fetchWorkspaceName(workspaceId).then(name => {
-        if (name) setJoiningWorkspaceName(name)
-      })
-    }
-  }, [workspaceId, setJoiningWorkspaceName, fetchWorkspaceName])
-
-  return null
 }
 

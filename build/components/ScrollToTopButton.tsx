@@ -6,7 +6,7 @@ const ScrollToTopButton: React.FC = () => {
 
   useEffect(() => {
     const toggleVisibility = () => {
-      const chatContainer = document.querySelector('.overflow-y-auto');
+      const chatContainer = document.querySelector('.custom-scrollbar');
       if (chatContainer && chatContainer.scrollTop > 300) {
         setIsVisible(true);
       } else {
@@ -14,7 +14,7 @@ const ScrollToTopButton: React.FC = () => {
       }
     };
 
-    const chatContainer = document.querySelector('.overflow-y-auto');
+    const chatContainer = document.querySelector('.custom-scrollbar');
     if (chatContainer) {
       chatContainer.addEventListener('scroll', toggleVisibility);
     }
@@ -27,7 +27,7 @@ const ScrollToTopButton: React.FC = () => {
   }, []);
 
   const scrollToTop = () => {
-    const chatContainer = document.querySelector('.overflow-y-auto');
+    const chatContainer = document.querySelector('.custom-scrollbar');
     if (chatContainer) {
       chatContainer.scrollTo({
         top: 0,

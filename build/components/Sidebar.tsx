@@ -37,8 +37,9 @@ const Sidebar: FC<SidebarProps> = ({
 }) => {
   const [showShareLink, setShowShareLink] = useState(false)
   const [shareLink, setShareLink] = useState('')
-  const [showWorkspaces, setShowWorkspaces] = useState(true)
+  const [showWorkspaces, setShowWorkspaces] = useState(false)
   const [channels, setChannels] = useState<Channel[]>([])
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     fetchChannels()
@@ -55,9 +56,15 @@ const Sidebar: FC<SidebarProps> = ({
   }
 
   const handleShareWorkspace = () => {
-    const link = `${window.location.origin}?workspaceId=${activeWorkspace}`
+    const link = `${window.location.origin}/auth?workspaceId=${activeWorkspace}`
     setShareLink(link)
     setShowShareLink(true)
+    navigator.clipboard.writeText(link)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000) // Reset after 2 seconds
+      })
+      .catch(err => console.error('Failed to copy link:', err))
   }
 
   const currentWorkspace = workspaces.find(w => w.id === activeWorkspace)
@@ -72,7 +79,48 @@ const Sidebar: FC<SidebarProps> = ({
       <div className="mb-4 px-4">
         <UserStatus currentUser={currentUser} />
       </div>
-      <div className="mb-4 px-4">
+      
+      {activeWorkspace && (
+        <>
+          <button
+            onClick={handleShareWorkspace}
+            className="mb-4 mx-4 bg-blue-500 text-white p-2 rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors"
+          >
+            <Share2 size={18} className="mr-2" />
+            {copied ? 'Copied!' : 'Share Workspace'}
+          </button>
+          {showShareLink && (
+            <div className="mb-4 mx-4 p-2 bg-gray-700 rounded-lg">
+              <p className="text-sm mb-2">Share this link:</p>
+              <input
+                type="text"
+                value={shareLink}
+                readOnly
+                className="w-full bg-gray-600 text-white p-1 rounded"
+                onClick={(e) => e.currentTarget.select()}
+              />
+            </div>
+          )}
+          <div className="flex-grow overflow-y-auto custom-scrollbar">
+            <ChannelList
+              channels={channels}
+              activeChannel={activeChannel}
+              onChannelSelect={setActiveChannel}
+              workspaceId={activeWorkspace}
+              currentUser={currentUser}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export default Sidebar
+
+
+/**
+ <div className="mb-4 px-4">
         <button
           className="flex items-center text-lg font-semibold mb-2 hover:text-gray-300 transition-colors duration-200"
           onClick={() => setShowWorkspaces(!showWorkspaces)}
@@ -98,41 +146,5 @@ const Sidebar: FC<SidebarProps> = ({
           </ul>
         )}
       </div>
-      {activeWorkspace && (
-        <>
-          <button
-            onClick={handleShareWorkspace}
-            className="mb-4 mx-4 bg-blue-500 text-white p-2 rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors"
-          >
-            <Share2 size={18} className="mr-2" />
-            Share Workspace
-          </button>
-          {showShareLink && (
-            <div className="mb-4 mx-4 p-2 bg-gray-700 rounded-lg">
-              <p className="text-sm mb-2">Share this link:</p>
-              <input
-                type="text"
-                value={shareLink}
-                readOnly
-                className="w-full bg-gray-600 text-white p-1 rounded"
-                onClick={(e) => e.currentTarget.select()}
-              />
-            </div>
-          )}
-          <div className="flex-1 overflow-y-auto px-2 space-y-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
-            <ChannelList
-              channels={channels}
-              activeChannel={activeChannel}
-              onChannelSelect={setActiveChannel}
-              workspaceId={activeWorkspace}
-              currentUser={currentUser}
-            />
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-export default Sidebar
+ */
 

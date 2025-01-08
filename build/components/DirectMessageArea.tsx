@@ -7,14 +7,21 @@ import EmojiPicker from 'emoji-picker-react'
 import ChatHeader from './ChatHeader'
 import ProfileCard from './ProfileCard'
 
+interface SearchResult {
+  messageId: string;
+  channelId: string;
+  content: string;
+  sender: string;
+  timestamp: string;
+  channelName: string;
+}
+
 interface DirectMessage {
   id: string;
   content: string;
   created_at: string;
   user_id: string;
   receiver_id: string;
-  is_direct_message: boolean;
-  channel: string;
   sender: {
     id: string;
     username: string;
@@ -113,11 +120,12 @@ const DirectMessageArea: FC<DirectMessageAreaProps> = ({ currentUser, otherUserI
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
+    <div className="flex flex-col h-full bg-gray-800 dark:bg-gray-900">
       <ChatHeader
         channelName={otherUser?.username || 'Direct Message'}
         isDM={true}
         onSearchResult={handleSearchResult}
+        userWorkspaces={[]}
       />
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">

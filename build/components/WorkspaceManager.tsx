@@ -7,6 +7,7 @@ interface Workspace {
   id: string
   name: string
   role: string
+  isFavorite: boolean
 }
 
 interface WorkspaceManagerProps {
@@ -29,7 +30,10 @@ export default function WorkspaceManager({ activeWorkspace, onWorkspaceSelect }:
   const fetchWorkspaces = async () => {
     if (user) {
       const fetchedWorkspaces = await getWorkspaces(user.id)
-      setWorkspaces(fetchedWorkspaces)
+      setWorkspaces(fetchedWorkspaces.map(workspace => ({
+        ...workspace,
+        isFavorite: false
+      })))
     }
   }
 
@@ -38,7 +42,12 @@ export default function WorkspaceManager({ activeWorkspace, onWorkspaceSelect }:
     if (newWorkspaceName && user) {
       const createdWorkspace = await createWorkspace(newWorkspaceName, user.id)
       if (createdWorkspace) {
-        setWorkspaces([...workspaces, { ...createdWorkspace, role: 'admin' }])
+        setWorkspaces([...workspaces, {
+          id: createdWorkspace.workspace.id,
+          name: createdWorkspace.workspace.name,
+          role: 'admin',
+          isFavorite: false
+        }])
         setNewWorkspaceName('')
       }
     }
@@ -47,11 +56,9 @@ export default function WorkspaceManager({ activeWorkspace, onWorkspaceSelect }:
   const handleJoinWorkspace = async (e: React.FormEvent) => {
     e.preventDefault()
     if (joinWorkspaceId && user) {
-      const joinedWorkspace = await joinWorkspace(joinWorkspaceId, user.id)
-      if (joinedWorkspace) {
-        await fetchWorkspaces()
-        setJoinWorkspaceId('')
-      }
+      await joinWorkspace(joinWorkspaceId, user.id)
+      await fetchWorkspaces()
+      setJoinWorkspaceId('')
     }
   }
 

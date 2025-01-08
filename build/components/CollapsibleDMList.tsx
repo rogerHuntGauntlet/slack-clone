@@ -8,6 +8,7 @@ interface DMListProps {
   workspaceId: string;
   onSelectDM: (userId: string) => void;
   activeUserId: string | null;
+  className?: string;
 }
 
 interface DMUser {
@@ -20,29 +21,13 @@ interface DMUser {
 
 export default function CollapsibleDMList({ workspaceId, onSelectDM, activeUserId }: DMListProps) {
   const [users, setUsers] = useState<DMUser[]>([])
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isCollapsed, setIsCollapsed] = useState(true)
 
   useEffect(() => {
     if (workspaceId) {
       fetchUsers()
     }
   }, [workspaceId])
-
-  useEffect(() => {
-    const subscription = supabase
-      .channel('public:users')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users' }, payload => {
-        const updatedUser = payload.new as DMUser
-        setUsers(prevUsers => prevUsers.map(user => 
-          user.id === updatedUser.id ? { ...user, status: updatedUser.status } : user
-        ))
-      })
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [])
 
   const fetchUsers = async () => {
     const workspaceUsers = await getWorkspaceUsers(workspaceId)
@@ -58,7 +43,7 @@ export default function CollapsibleDMList({ workspaceId, onSelectDM, activeUserI
         {!isCollapsed && <span className="text-xl font-bold">Direct Messages</span>}
         {isCollapsed ? <ChevronRight size={24} /> : <ChevronDown size={24} />}
       </button>
-      <div className="flex-grow overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full">
+      <div className="flex-grow overflow-y-auto custom-scrollbar">
         <ul className="space-y-1 p-2">
           {users.map((user) => (
             <li key={user.id}>

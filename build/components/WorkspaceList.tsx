@@ -4,6 +4,7 @@ import { PlusCircle, Folder, Star, Search } from 'lucide-react'
 interface Workspace {
   id: string
   name: string
+  role: string
   isFavorite: boolean
 }
 
@@ -72,7 +73,9 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      onToggleFavorite(workspace.id)
+                      if (workspace.id) {
+                        onToggleFavorite(workspace.id)
+                      }
                     }}
                     className="text-yellow-300 hover:text-yellow-400"
                   >
@@ -104,7 +107,9 @@ const WorkspaceList: React.FC<WorkspaceListProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    onToggleFavorite(workspace.id)
+                    if (workspace.id) {
+                      onToggleFavorite(workspace.id)
+                    }
                   }}
                   className={`${
                     workspace.isFavorite ? 'text-yellow-300 hover:text-yellow-400' : 'text-gray-400 hover:text-gray-500'

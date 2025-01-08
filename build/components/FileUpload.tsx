@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { X, Upload } from 'lucide-react'
-import { Storage } from 'aws-amplify'
+import { supabase } from '../lib/supabase'
 
 interface FileUploadProps {
   onUpload: (fileUrl: string, fileName: string) => void
@@ -41,14 +41,23 @@ export default function FileUpload({ onUpload, onClose }: FileUploadProps) {
   const uploadFile = async (file: File) => {
     setUploading(true)
     try {
-      const result = await Storage.put(file.name, file, {
-        contentType: file.type
-      })
-      const fileUrl = await Storage.get(result.key)
-      onUpload(fileUrl, file.name)
-    } catch (error) {
+      const { data, error } = await supabase.storage
+        .from('message_attachments')
+        .upload(`uploads/${file.name}`, file, {
+          cacheControl: '3600',
+          upsert: false,
+        })
+
+      if (error) throw error
+
+      const { data: publicUrlData } = supabase.storage
+        .from('message_attachments')
+        .getPublicUrl(`uploads/${file.name}`)
+
+      onUpload(publicUrlData.publicUrl, file.name)
+    } catch (error: any) {
       console.error('Error uploading file:', error)
-      alert('Failed to upload file. Please try again.')
+      alert(`Failed to upload file: ${error.message}`)
     } finally {
       setUploading(false)
     }
@@ -64,9 +73,8 @@ export default function FileUpload({ onUpload, onClose }: FileUploadProps) {
           </button>
         </div>
         <div
-          className={`border-2 border-dashed ${
-            dragOver ? 'border-blue-500' : 'border-gray-300'
-          } rounded-lg p-8 text-center cursor-pointer`}
+          className={`border-2 border-dashed ${dragOver ? 'border-blue-500' : 'border-gray-300'
+            } rounded-lg p-8 text-center cursor-pointer`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -82,6 +90,15 @@ export default function FileUpload({ onUpload, onClose }: FileUploadProps) {
             onChange={handleFileInput}
             className="hidden"
           />
+        </div>
+        <div className="flex justify-center mt-4">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center p-2 border border-gray-300 rounded-lg hover:bg-gray-200 transition duration-200"
+          >
+            <Upload size={24} className="mr-2" />
+            <span>Upload File</span>
+          </button>
         </div>
       </div>
     </div>

@@ -2,7 +2,13 @@ import React from 'react';
 import Link from 'next/link';
 import { ArrowRight, MessageSquare, Shield, Zap } from 'lucide-react';
 
-const FeatureCard = ({ icon: Icon, title, description }) => (
+interface FeatureCardProps {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+}
+
+const FeatureCard = ({ icon: Icon, title, description }: FeatureCardProps) => (
   <div className="bg-white/10 backdrop-blur-lg p-6 rounded-xl border border-white/20 transform hover:scale-105 transition-all duration-300">
     <div className="mb-4 inline-block p-3 bg-blue-500/20 rounded-lg">
       <Icon className="w-6 h-6 text-blue-500" />

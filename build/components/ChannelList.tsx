@@ -42,7 +42,7 @@ export default function ChannelList({ channels, activeChannel, onChannelSelect, 
   }
 
   return (
-    <div className="w-full text-white space-y-4">
+    <div className="w-full text-white space-y-4 px-4">
       <h2 className="text-xl font-bold mb-2">Channels</h2>
       <form onSubmit={handleAddChannel} className="mb-4 flex items-center">
         <input

@@ -1,7 +1,7 @@
 'use client'
 
 import { FC, useState, useEffect, useRef, ChangeEvent } from 'react'
-import { Send, Paperclip, Smile, X } from 'lucide-react'
+import { Send, Paperclip, Smile, X, Music, Film, FileText, Image } from 'lucide-react'
 import Message from './Message'
 import EmojiPicker from 'emoji-picker-react'
 import ScrollToTopButton from './ScrollToTopButton'
@@ -10,6 +10,7 @@ import { getMessages, sendMessage, sendReply } from '../lib/supabase'
 import ChatHeader from './ChatHeader'
 import { useDropzone } from 'react-dropzone'
 import debounce from 'lodash/debounce'
+import TwitterFeed from './TwitterFeed'
 
 interface ChatAreaProps {
   activeWorkspace: string;
@@ -17,6 +18,11 @@ interface ChatAreaProps {
   currentUser: { id: string; email: string };
   onSwitchChannel: (channelId: string) => void;
   userWorkspaces: string[];
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  typingUsers: TypingStatus[];
+  onlineUsers: UserStatus[];
+  updateTypingStatus: (isTyping: boolean) => Promise<void>;
 }
 
 interface MessageType {
@@ -49,10 +55,28 @@ interface SearchResult {
   timestamp: string;
 }
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+interface FileAttachment {
+  id: string;
+  file_name: string;
+  file_type: string;
+  file_url: string;
+}
+
+interface TypingStatus {
+  userId: string;
+  channelId: string;
+  isTyping: boolean;
+}
+
+interface UserStatus {
+  id: string;
+  online: boolean;
+  last_seen: string;
+}
+
 const ALLOWED_FILE_TYPES = ['image/*', 'application/pdf', 'text/plain', 'video/*', 'audio/*'];
 
-const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUser, onSwitchChannel, userWorkspaces }) => {
+const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUser, onSwitchChannel, userWorkspaces, isCollapsed, onToggleCollapse }) => {
   const [messages, setMessages] = useState<MessageType[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -70,10 +94,27 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
     fetchChannelName()
     const subscription = supabase
       .channel('public:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async payload => {
         const newMessage = payload.new as MessageType
         if (newMessage.channel === activeChannel) {
-          setMessages(prevMessages => [...prevMessages, newMessage])
+          // Fetch the complete message with user data
+          const { data: messageWithUser } = await supabase
+            .from('messages')
+            .select(`
+              *,
+              user:users!messages_user_id_fkey(
+                id,
+                username,
+                avatar_url,
+                email
+              )
+            `)
+            .eq('id', newMessage.id)
+            .single()
+
+          if (messageWithUser) {
+            setMessages(prevMessages => [...prevMessages, messageWithUser])
+          }
         }
       })
       .subscribe()
@@ -89,6 +130,15 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
       setNewMessage(savedDraft)
     }
   }, [activeChannel])
+
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError(null)
+      }, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [error])
 
   const fetchMessages = async () => {
     try {
@@ -127,13 +177,40 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
     e.preventDefault()
     if ((newMessage.trim() || selectedFiles.length > 0) && currentUser) {
       try {
-        let fileUrls: string[] = []
+        let attachments: FileAttachment[] = []
+
+        // Upload files if any
         if (selectedFiles.length > 0) {
-          fileUrls = await Promise.all(selectedFiles.map(file => uploadFile(file)))
+          const uploadedUrls = await Promise.all(selectedFiles.map(file => uploadFile(file)));
+          attachments = uploadedUrls.map((url, index) => ({
+            id: `${Date.now()}-${index}`,
+            file_name: selectedFiles[index].name,
+            file_type: selectedFiles[index].type,
+            file_url: url
+          }));
         }
 
-        const sentMessage = await sendMessage(activeChannel, currentUser.id, newMessage.trim(), fileUrls)
-        setMessages(prevMessages => [...prevMessages, sentMessage])
+        // Send message with attachments
+        const sentMessage = await sendMessage(
+          activeChannel,
+          currentUser.id,
+          newMessage.trim(),
+          attachments
+        )
+
+        // Update messages state with the new message
+        setMessages(prevMessages => [...prevMessages, {
+          ...sentMessage,
+          channel: activeChannel,
+          user: {
+            id: currentUser.id,
+            username: currentUser.email,
+            avatar_url: ''
+          },
+          file_attachments: attachments
+        } as MessageType])
+
+        // Clear form
         setNewMessage('')
         setSelectedFiles([])
         setError(null)
@@ -149,9 +226,19 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
     if (content && currentUser) {
       try {
         const sentReply = await sendReply(activeChannel, currentUser.id, parentId, content)
-        setMessages(prevMessages => prevMessages.map(message => 
-          message.id === parentId 
-            ? { ...message, replies: [...(message.replies || []), sentReply] }
+        setMessages(prevMessages => prevMessages.map(message =>
+          message.id === parentId
+            ? {
+              ...message, replies: [...(message.replies || []), {
+                ...sentReply,
+                channel: activeChannel,
+                user: {
+                  id: currentUser.id,
+                  username: currentUser.email,
+                  avatar_url: ''
+                }
+              }]
+            }
             : message
         ))
         setError(null)
@@ -170,7 +257,7 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
     if (result.channelId !== activeChannel) {
       onSwitchChannel(result.channelId);
     }
-    
+
     setTimeout(() => {
       const messageElement = document.getElementById(`message-${result.messageId}`);
       if (messageElement) {
@@ -186,38 +273,78 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
   };
 
   const onDrop = (acceptedFiles: File[]) => {
-    const validFiles = acceptedFiles.filter(file => 
-      file.size <= MAX_FILE_SIZE && ALLOWED_FILE_TYPES.some(type => file.type.match(type))
+    console.log('onDrop triggered with files:', acceptedFiles);
+
+    const validFiles = acceptedFiles
+    /** 
+    .filter(file =>
+      ALLOWED_FILE_TYPES.some(type => file.type.match(type))
     );
-    setSelectedFiles(prevFiles => [...prevFiles, ...validFiles]);
-    
-    const invalidFiles = acceptedFiles.filter(file => 
-      file.size > MAX_FILE_SIZE || !ALLOWED_FILE_TYPES.some(type => file.type.match(type))
+    */
+    console.log('Valid files:', validFiles);
+
+    setSelectedFiles(prevFiles => {
+      console.log('Setting selected files:', [...prevFiles, ...validFiles]);
+      return [...prevFiles, ...validFiles];
+    });
+
+    const invalidFiles: File[] = []
+    /** 
+    .filter(file =>
+      !ALLOWED_FILE_TYPES.some(type => file.type.match(type))
     );
+    */
     if (invalidFiles.length > 0) {
+      console.log('Invalid files:', invalidFiles);
       setError(`Some files were not added due to size or type restrictions: ${invalidFiles.map(f => f.name).join(', ')}`);
     }
   }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop })
 
-  const uploadFile = async (file: File): Promise<string> => {
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${Date.now()}.${fileExt}`
-    const { data, error } = await supabase.storage
-      .from('message_attachments')
-      .upload(fileName, file)
+  const uploadFile = async (file: File) => {
+    console.log('Starting file upload for:', file.name);
+    console.log('File size:', file.size, 'bytes');
+    console.log('File type:', file.type);
 
-    if (error) {
-      console.error('Error uploading file:', error)
-      throw error
+    try {
+      if (file.size > 4 * 1024 * 1024 * 1024) {
+        console.log('File too large:', file.size);
+        throw new Error('File size exceeds 4GB limit');
+      }
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${currentUser.id}${Math.random()}.${fileExt}`;
+      console.log('Generated filename:', fileName);
+
+      console.log('Attempting Supabase upload...');
+      const { data, error } = await supabase.storage
+        .from('message_attachments')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      console.log('Upload response:', { data, error });
+
+      if (error) {
+        console.error('Upload error:', error);
+        throw error;
+      }
+
+      console.log('Getting public URL...');
+      const { data: publicUrlData } = supabase.storage
+        .from('message_attachments')
+        .getPublicUrl(fileName);
+
+      console.log('Public URL data:', publicUrlData);
+      return publicUrlData.publicUrl;
+    } catch (error) {
+      console.error('Upload failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload file';
+      setError(errorMessage);
+      throw error;
     }
-
-    const { data: publicUrlData } = supabase.storage
-      .from('message_attachments')
-      .getPublicUrl(fileName)
-
-    return publicUrlData.publicUrl
   }
 
   const removeFile = (index: number) => {
@@ -230,6 +357,7 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
     setIsTyping(true)
     debouncedSaveDraft(value)
     debouncedStopTyping()
+
   }
 
   const debouncedSaveDraft = debounce((value: string) => {
@@ -238,7 +366,7 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
 
   const debouncedStopTyping = debounce(() => {
     setIsTyping(false)
-  }, 1000)
+  }, 2500)
 
   const getFileIcon = (fileType: string) => {
     if (fileType.startsWith('image/')) return <Image size={24} />;
@@ -249,105 +377,179 @@ const ChatArea: FC<ChatAreaProps> = ({ activeWorkspace, activeChannel, currentUs
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
-      <ChatHeader
-        channelName={channelName}
-        isDM={false}
-        onSearchResult={handleSearchResult}
-        userWorkspaces={userWorkspaces}
-      />
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-          <strong className="font-bold">Error:</strong>
-          <span className="block sm:inline"> {error}</span>
-        </div>
-      )}
-      {searchResults.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
-          <h3 className="text-lg font-semibold mb-2">Search Results:</h3>
-           <ul className="flex-grow overflow-y-auto space-y-1 pr-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full">
-            {searchResults.map((result, index) => (
-              <li
-                key={index}
-                onClick={() => handleSelectSearchResult(result)}
-                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded"
-              >
-                <p className="font-semibold">{result.sender} in #{channelName}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{result.content}</p>
-                <p className="text-xs text-gray-500">{result.timestamp}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <Message
-            key={message.id}
-            message={message}
-            currentUser={currentUser}
-            onReply={handleReply}
-          />
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-      <form onSubmit={handleSendMessage} className="p-4 bg-gray-100 dark:bg-gray-800 flex items-start space-x-2">
-        <div {...getRootProps()} className={`w-1/10 border-2 border-dashed rounded-lg p-2 ${isDragActive ? 'border-blue-500 bg-blue-50 dark:bg-blue-900' : 'border-gray-300 dark:border-gray-600'}`}>
-          <input {...getInputProps()} />
-          <Paperclip className="mx-auto text-gray-500 dark:text-gray-400" />
-        </div>
-        <textarea
-          value={newMessage}
-          onChange={(e) => handleTextAreaChange(e)}
-          placeholder="Type your message..."
-          className="flex-1 p-2 mx-2 rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
-          rows={3}
+    <div className="flex flex-1 overflow-hidden bg-gray-800">
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <ChatHeader
+          channelName={channelName}
+          isDM={false}
+          onSearchResult={handleSearchResult}
+          userWorkspaces={userWorkspaces}
+          isCollapsed={isCollapsed}
+          onToggleCollapse={onToggleCollapse}
         />
-        <div className="flex flex-col space-y-2">
-          <button
-            type="button"
-            className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors duration-200"
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-          >
-            <Smile size={24} />
-          </button>
-          <button
-            type="submit"
-            className="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 transition-colors duration-200"
-          >
-            <Send size={24} />
-          </button>
-        </div>
-        {showEmojiPicker && (
-          <div className="absolute bottom-20 right-8 z-10">
-            <EmojiPicker
-              onEmojiClick={(emojiObject) => {
-                setNewMessage(newMessage + emojiObject.emoji)
-                setShowEmojiPicker(false)
-              }}
-            />
+        {error && (
+          <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50">
+            <div className="bg-red-50 dark:bg-red-900 border-l-4 border-red-500 p-4 rounded-lg shadow-lg">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <button
+                    onClick={() => setError(null)}
+                    className="text-red-400 hover:text-red-600 transition-colors"
+                  >
+                    <X className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
+                    Upload Error
+                  </h3>
+                  <div className="mt-2 text-sm text-red-700 dark:text-red-300">
+                    {error.includes('size')
+                      ? 'File is too large. Maximum size is 4GB.'
+                      : error.includes('type')
+                        ? 'Invalid file type. Supported types: images, PDFs, text, video, and audio files.'
+                        : error
+                    }
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
-      </form>
-      {selectedFiles.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {selectedFiles.map((file, index) => (
-            <div key={index} className="flex items-center bg-gray-200 dark:bg-gray-700 rounded-full px-2 py-1 text-xs">
-              {getFileIcon(file.type)}
-              <span className="ml-1 truncate max-w-[100px]">{file.name}</span>
-              <button type="button" onClick={() => removeFile(index)} className="ml-1 text-red-500 hover:text-red-700">
-                <X size={12} />
-              </button>
-            </div>
+        {searchResults.length > 0 && (
+          <div className="bg-gray-800 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
+            <h3 className="text-lg font-semibold mb-2">Search Results:</h3>
+            <ul className="flex-grow overflow-y-auto space-y-1 pr-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full">
+              {searchResults.map((result, index) => (
+                <li
+                  key={index}
+                  onClick={() => handleSelectSearchResult(result)}
+                  className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded"
+                >
+                  <p className="font-semibold">{result.sender} in #{channelName}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{result.content}</p>
+                  <p className="text-xs text-gray-500">{result.timestamp}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+          {messages.map((message) => (
+            <Message
+              key={message.id}
+              message={message}
+              currentUser={currentUser}
+              onReply={handleReply}
+            />
           ))}
+          <div ref={messagesEndRef} />
         </div>
-      )}
-      {isTyping && (
-        <div className="text-sm text-gray-500 dark:text-gray-400 p-2">
-          Someone is typing...
+        <div
+          style={{
+            transition: 'max-height 0.3s ease, opacity 0.3s ease',
+            maxHeight: (isTyping || selectedFiles.length > 0) ? '150px' : '0',
+            opacity: (isTyping || selectedFiles.length > 0) ? 1 : 0,
+            overflow: 'hidden',
+            backgroundColor: '#ffffff',
+            borderTopLeftRadius: '8px',
+            borderTopRightRadius: '8px',
+            padding: (isTyping || selectedFiles.length > 0) ? '8px' : '0',
+            border: 'none',
+            boxShadow: 'none',
+          }}
+        >
+          {isTyping && (
+            <div
+              style={{
+                padding: '8px',
+                fontSize: '0.875rem',
+                color: '#6b7280',
+              }}
+            >
+              Someone is typing...
+            </div>
+          )}
+          
+          {selectedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 p-2">
+              {selectedFiles.map((file, index) => (
+                <div key={index} className="flex items-center bg-gray-200 dark:bg-gray-700 rounded-full px-3 py-1">
+                  {getFileIcon(file.type)}
+                  <span className="ml-2 text-sm text-gray-700 dark:text-gray-300 truncate max-w-[150px]">
+                    {file.name}
+                  </span>
+                  <button
+                    onClick={() => removeFile(index)}
+                    className="ml-2 text-gray-500 hover:text-red-500 transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
-      <ScrollToTopButton />
+        
+        <form onSubmit={handleSendMessage} className="p-4 bg-gray-100 dark:bg-gray-800 flex items-start space-x-2">
+          <div
+            {...getRootProps()}
+            className={`
+              w-10 h-10 flex items-center justify-center rounded-lg
+              transition-all duration-200 ease-in-out
+              ${isDragActive
+                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900'
+                : 'hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95'
+              }
+            `}
+          >
+            <input {...getInputProps()} />
+            <Paperclip className={`
+              transform transition-all duration-200
+              ${isDragActive
+                ? 'text-blue-500 scale-110'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }
+            `} />
+          </div>
+          <textarea
+            value={newMessage}
+            onChange={(e) => handleTextAreaChange(e)}
+            placeholder="Type your message..."
+            className="flex-1 p-2 mx-2 rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 dark:bg-gray-700 text-white dark:text-white resize-none"
+            rows={3}
+          />
+          <div className="flex flex-col space-y-2">
+            <button
+              type="button"
+              className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors duration-200"
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+            >
+              <Smile size={24} />
+            </button>
+            <button
+              type="submit"
+              className="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 transition-colors duration-200"
+            >
+              <Send size={24} />
+            </button>
+          </div>
+          {showEmojiPicker && (
+            <div className="absolute bottom-20 right-8 z-10">
+              <EmojiPicker
+                onEmojiClick={(emojiObject) => {
+                  setNewMessage(newMessage + emojiObject.emoji)
+                  setShowEmojiPicker(false)
+                }}
+              />
+            </div>
+          )}
+        </form>
+
+        <ScrollToTopButton />
+      </div>
+
+      <TwitterFeed />
     </div>
   )
 }
