@@ -1,0 +1,29 @@
+{
+    "family": "slack-clone",
+    "networkMode": "awsvpc",
+    "containerDefinitions": [
+        {
+            "name": "slack-clone",
+            "image": "${ECR_REPOSITORY_URI}:latest",
+            "portMappings": [
+                {
+                    "containerPort": 3000,
+                    "protocol": "tcp"
+                }
+            ],
+            "environment": [
+                {
+                    "name": "NEXT_PUBLIC_SUPABASE_URL",
+                    "value": "${NEXT_PUBLIC_SUPABASE_URL}"
+                },
+                {
+                    "name": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+                    "value": "${NEXT_PUBLIC_SUPABASE_ANON_KEY}"
+                }
+            ]
+        }
+    ],
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512"
+} 
